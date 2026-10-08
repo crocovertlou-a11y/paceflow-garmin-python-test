@@ -1,0 +1,12 @@
+{
+  "name": "PaceFlow Python bridge — 4x2km",
+  "sport": "running",
+  "blocks": [
+    {"steps": [{"kind": "warmup", "distance_m": 2000}]},
+    {"repeat": 4, "steps": [
+      {"kind": "interval", "distance_m": 2000, "pace": {"slow": "4:45", "fast": "4:30"}},
+      {"kind": "recovery", "seconds": 60}
+    ]},
+    {"steps": [{"kind": "cooldown", "distance_m": 2000}]}
+  ]
+}
