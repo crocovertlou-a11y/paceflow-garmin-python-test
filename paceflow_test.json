@@ -1,0 +1,15 @@
+{
+  "title": "PaceFlow - Test integration 4x2km",
+  "structured_workout": {
+    "version": 1,
+    "valid": true,
+    "blocks": [
+      {"kind": "warmup", "duration": {"value": 2, "unit": "km"}},
+      {"kind": "repeat", "repeat": 4, "children": [
+        {"kind": "work", "duration": {"value": 2, "unit": "km"}, "target": {"type": "pace_range", "min": "4:30", "max": "4:45"}},
+        {"kind": "recovery", "duration": {"value": 1, "unit": "min"}}
+      ]},
+      {"kind": "cooldown", "duration": {"value": 2, "unit": "km"}}
+    ]
+  }
+}

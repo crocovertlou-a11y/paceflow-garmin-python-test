@@ -5,7 +5,7 @@ import os
 from datetime import date
 from getpass import getpass
 from pathlib import Path
-from paceflow_mapping import convert_paceflow
+
 
 def workout_payload():
     def step(order, kind, end, value, target=None):
@@ -32,14 +32,9 @@ def main():
     p.add_argument('--date',default='2026-10-09')
     p.add_argument('--send',action='store_true',help='Explicitly enable Garmin upload')
     p.add_argument('--push-device',action='store_true',help='Push to last used device after upload')
-    p.add_argument('--paceflow-file', help='Fichier JSON de séance PaceFlow')
     args=p.parse_args()
     date.fromisoformat(args.date)
-    if args.paceflow_file:
-        with open(args.paceflow_file, encoding='utf-8') as f:
-            payload = convert_paceflow(json.load(f))
-    else:
-        payload = workout_payload()
+    payload=workout_payload()
     print('Séance: 2 km échauffement; 4 x (2 km à 4:30–4:45/km + 60 s récupération); 2 km retour au calme')
     print('Date:',args.date, '| étapes:',len(payload['workoutSegments'][0]['workoutSteps']))
     print(json.dumps(payload,indent=2,ensure_ascii=False))
