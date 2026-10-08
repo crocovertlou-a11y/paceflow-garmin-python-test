@@ -1,0 +1,15 @@
+
+__pycache__/
+*.pyc
+.env
+.env.*
+
+# Garmin authentication
+.garminconnect/
+.garmin/
+.garmin_tokens/
+garmin_tokens/
+.garminconnect-tokens/
+*.session
+*.token
+.pytest_cache/
