@@ -51,16 +51,3 @@ def convert_workout(request: WorkoutRequest):
 from paceflow_mapping import convert_paceflow
 from fastapi import HTTPException
 
-@app.post("/workouts/convert")
-def convert_workout(request: WorkoutRequest):
-    try:
-        converted = convert_paceflow(
-            {"title": request.structured_workout.get("title", "Séance PaceFlow"), "structured_workout": request.structured_workout}
-        )
-        return {
-            "status": "converted",
-            "workout": converted,
-            "garmin_sent": False
-        }
-    except (ValueError, KeyError, TypeError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
