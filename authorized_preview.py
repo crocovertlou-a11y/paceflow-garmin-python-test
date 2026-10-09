@@ -35,7 +35,7 @@ def _request(url, key, bearer, *, timeout=12):
         raise AccessError('Supabase authorization unavailable') from exc
 
 
-def preview_workout(user_jwt, workout_id, athlete_id, *, env=None, fetch=None):
+def preview_workout(user_jwt, workout_id, athlete_id, *, env=None, fetch=None, athlete_only=False):
     env = os.environ if env is None else env
     base = env.get('SUPABASE_URL', '').rstrip('/')
     anon = env.get('SUPABASE_ANON_KEY', '')
@@ -64,7 +64,7 @@ def preview_workout(user_jwt, workout_id, athlete_id, *, env=None, fetch=None):
         raise AccessError('Athlete not found')
     a = athlete[0]
     allowed = a.get('user_id') == uid
-    if not allowed:
+    if not allowed and not athlete_only:
         coaches = rows('coaches', 'id', user_id=uid)
         coach_ids = [c['id'] for c in coaches]
         for coach_id in coach_ids:
