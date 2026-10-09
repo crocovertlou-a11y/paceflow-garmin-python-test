@@ -51,3 +51,33 @@ def convert_workout(request: WorkoutRequest):
 from paceflow_mapping import convert_paceflow
 from fastapi import HTTPException
 
+
+@app.post("/workouts/simulate-send")
+def simulate_send_workout(request: WorkoutRequest):
+    from garmin_sender import send_workout
+
+    converted = convert_paceflow({
+        "title": request.structured_workout.get(
+            "title", "Séance PaceFlow"
+        ),
+        "structured_workout": request.structured_workout,
+    })
+
+    class FakeGarmin:
+        def upload_workout(self, payload):
+            return {"workoutId": 12345}
+
+        def schedule_workout(self, workout_id, date):
+            return {"workoutScheduleId": 67890}
+
+    result = send_workout(
+        FakeGarmin(),
+        converted,
+        "2026-10-09"
+    )
+
+    return {
+        "simulation": True,
+        "garmin_sent": False,
+        "result": result
+    }
