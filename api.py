@@ -81,3 +81,23 @@ def simulate_send_workout(request: WorkoutRequest):
         "garmin_sent": False,
         "result": result
     }
+
+# Secure, read-only preview of the canonical Supabase workout.
+# This endpoint NEVER creates or schedules a Garmin workout.
+from fastapi import Header
+from authorized_preview import preview_workout, AccessError
+
+class AuthorizedPreviewRequest(BaseModel):
+    workout_id: str
+    athlete_id: str
+
+@app.post('/workouts/authorized-preview')
+def authorized_preview(request: AuthorizedPreviewRequest, authorization: str | None = Header(default=None)):
+    if not authorization or not authorization.startswith('Bearer '):
+        raise HTTPException(status_code=401, detail='Authentication required')
+    try:
+        return preview_workout(authorization[7:], request.workout_id, request.athlete_id)
+    except AccessError:
+        raise HTTPException(status_code=403, detail='Access denied or unavailable') from None
+    except ValueError:
+        raise HTTPException(status_code=422, detail='Invalid workout data') from None
