@@ -106,7 +106,13 @@ def authorized_preview(request: AuthorizedPreviewRequest, authorization: str | N
 # Real send: Python owns the entire Garmin API interaction. No credential persistence.
 # Athlete ownership and canonical workout are verified by Supabase on every request.
 from pydantic import Field
+from fastapi import Request
+from fastapi.responses import JSONResponse
 from datetime import date
+from threading import Lock
+
+_send_guard = Lock()
+_inflight_workouts = set()  # process-local only; NOT durable idempotency
 
 class GarminSendRequest(BaseModel):
     workout_id: str
@@ -164,17 +170,11 @@ def send_canonical_workout(request: GarminSendRequest, authorization: str | None
         complete('auth_failed')
         raise HTTPException(status_code=428, detail='Code MFA Garmin requis. Renseigne le code puis reconnecte-toi.') from None
     except Exception as exc:
-        # Only a confirmed authentication rejection may release the claim.
-        # Timeouts, rate limits and unrecognized failures remain blocked as
-        # 'uncertain' so that a retry requires manual verification.
-        from garmin_auth_errors import classify_login_error
-        failure = classify_login_error(exc)
-        complete('auth_failed' if failure == 'auth_failed' else 'uncertain')
-        if failure == 'rate_limited':
-            raise HTTPException(status_code=429, detail='Garmin limite temporairement les connexions. Vérifie Garmin Connect avant toute nouvelle tentative.') from None
-        if failure == 'auth_failed':
-            raise HTTPException(status_code=401, detail='Identifiants Garmin refusés. Vérifie ton email et ton mot de passe.') from None
-        raise HTTPException(status_code=503, detail='Connexion Garmin interrompue ou résultat incertain. Vérifie Garmin Connect avant de réessayer.') from None
+        complete('auth_failed')
+        message = str(exc).lower()
+        if any(marker in message for marker in ('rate limit', 'rate_limit', 'too many requests', '429', 'preauthorized')):
+            raise HTTPException(status_code=429, detail='Garmin limite temporairement les connexions. Attends avant de réessayer.') from None
+        raise HTTPException(status_code=502, detail='Connexion Garmin refusée. Vérifie les identifiants ou le code MFA.') from None
     try:
         result = send_workout(client, canonical['garmin_workout'], canonical['scheduled_date'])
     except GarminPartialSendError as exc:

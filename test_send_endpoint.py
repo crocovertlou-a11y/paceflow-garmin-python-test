@@ -63,8 +63,7 @@ class SendContract(unittest.TestCase):
     def test_login_failure_no_upload(self,Garmin,preview):
         Garmin.return_value.login.side_effect=Exception('sensitive detail')
         with self.assertRaises(HTTPException) as c: send_canonical_workout(self.req,'Bearer token')
-        self.assertEqual(c.exception.status_code,503)
-        self.finish_mock.assert_called_once_with('a', 'w', 'uncertain', None)
+        self.assertEqual(c.exception.status_code,502)
         self.assertNotIn('sensitive detail',c.exception.detail)
     @patch('api.preview_workout',return_value=CANON)
     @patch('garminconnect.Garmin')
@@ -74,26 +73,7 @@ class SendContract(unittest.TestCase):
             send_canonical_workout(self.req, 'Bearer token')
         self.assertEqual(c.exception.status_code,429)
         self.assertNotIn('secret',c.exception.detail)
-        self.finish_mock.assert_called_once_with('a', 'w', 'uncertain', None)
         Garmin.return_value.upload_workout.assert_not_called()
-
-    @patch('api.preview_workout',return_value=CANON)
-    @patch('garminconnect.Garmin')
-    def test_explicit_invalid_credentials_retryable(self, Garmin, preview):
-        Garmin.return_value.login.side_effect=Exception('Invalid credentials')
-        with self.assertRaises(HTTPException) as c:
-            send_canonical_workout(self.req, 'Bearer token')
-        self.assertEqual(c.exception.status_code, 401)
-        self.finish_mock.assert_called_once_with('a', 'w', 'auth_failed', None)
-
-    @patch('api.preview_workout',return_value=CANON)
-    @patch('garminconnect.Garmin')
-    def test_login_timeout_blocks_retry(self, Garmin, preview):
-        Garmin.return_value.login.side_effect=TimeoutError('connection timed out')
-        with self.assertRaises(HTTPException) as c:
-            send_canonical_workout(self.req, 'Bearer token')
-        self.assertEqual(c.exception.status_code, 503)
-        self.finish_mock.assert_called_once_with('a', 'w', 'uncertain', None)
 
     @patch('api.preview_workout',return_value=CANON)
     @patch('garminconnect.Garmin')

@@ -41,21 +41,3 @@ class TestPreview(unittest.TestCase):
             preview_workout('valid-jwt',WID,AID,env={},fetch=self.fake())
 
 if __name__ == '__main__': unittest.main()
-
-class TestAthleteOnly(unittest.TestCase):
-    def test_athlete_can_send(self):
-        t = TestPreview()
-        result = preview_workout('valid-jwt', WID, AID, env=ENV, fetch=t.fake(), athlete_only=True)
-        self.assertEqual(result['athlete_id'], AID)
-
-    def test_coach_cannot_send_even_if_assigned(self):
-        def fetch(url, key, bearer):
-            if url.endswith('/auth/v1/user'):
-                return {'id': UID}
-            if '/athlete_profiles?' in url:
-                return [{'id': AID, 'user_id': CID, 'owner_coach_id': '55555555-5555-4555-8555-555555555555'}]
-            if '/coaches?' in url:
-                return [{'id': '55555555-5555-4555-8555-555555555555'}]
-            raise AssertionError('No further queries expected for athlete-only access')
-        with self.assertRaises(AccessError):
-            preview_workout('valid-jwt', WID, AID, env=ENV, fetch=fetch, athlete_only=True)

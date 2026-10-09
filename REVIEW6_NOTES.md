@@ -1,0 +1,1 @@
+Review 6 candidate only. Prevents simultaneous sends within ONE Python process; does not prevent duplicate requests across workers, restarts or successive sends. Durable ledger and real Garmin/MFA tests still required. Do not deploy to production.
