@@ -13,6 +13,8 @@ CANON = {'scheduled_date':'2026-10-09','athlete_id':'a','garmin_workout':{'worko
 
 class SendContract(unittest.TestCase):
     def setUp(self):
+        import api
+        api._garmin_cooldown_until = 0.0
         self.req=GarminSendRequest(workout_id='w',athlete_id='a',email='test@example.com',password='secret')
         self.claim_patch=patch('idempotency.claim')
         self.finish_patch=patch('idempotency.finish')
@@ -63,7 +65,7 @@ class SendContract(unittest.TestCase):
     def test_login_failure_no_upload(self,Garmin,preview):
         Garmin.return_value.login.side_effect=Exception('sensitive detail')
         with self.assertRaises(HTTPException) as c: send_canonical_workout(self.req,'Bearer token')
-        self.assertEqual(c.exception.status_code,502)
+        self.assertEqual(c.exception.status_code,503)
         self.assertNotIn('sensitive detail',c.exception.detail)
     @patch('api.preview_workout',return_value=CANON)
     @patch('garminconnect.Garmin')
@@ -81,6 +83,17 @@ class SendContract(unittest.TestCase):
     def test_uncertain_send(self,send,Garmin,preview):
         with self.assertRaises(HTTPException) as c: send_canonical_workout(self.req,'Bearer token')
         self.assertIn('incertain',c.exception.detail)
+
+    @patch('api.preview_workout',return_value=CANON)
+    @patch('garminconnect.Garmin')
+    def test_cooldown_prevents_claim_and_login(self, Garmin, preview):
+        import api, time
+        api._garmin_cooldown_until = time.monotonic() + 120
+        with self.assertRaises(HTTPException) as c:
+            send_canonical_workout(self.req, 'Bearer token')
+        self.assertEqual(c.exception.status_code, 429)
+        self.claim_mock.assert_not_called()
+        Garmin.assert_not_called()
 
     @patch('api.preview_workout',return_value=CANON)
     @patch('garminconnect.Garmin')

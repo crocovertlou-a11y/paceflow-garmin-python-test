@@ -135,6 +135,8 @@ def send_canonical_workout(request: GarminSendRequest, authorization: str | None
         date.fromisoformat(canonical['scheduled_date'])
     except ValueError:
         raise HTTPException(status_code=422, detail='Date invalide') from None
+    # Block a new send before taking a durable claim when Garmin is in cooldown.
+    _guard_garmin_login()
     from idempotency import claim, finish, AlreadyClaimed, LedgerError
     from garminconnect import Garmin
     from garmin_sender import send_workout, GarminPartialSendError
@@ -170,11 +172,21 @@ def send_canonical_workout(request: GarminSendRequest, authorization: str | None
         complete('auth_failed')
         raise HTTPException(status_code=428, detail='Code MFA Garmin requis. Renseigne le code puis reconnecte-toi.') from None
     except Exception as exc:
+        from garmin_auth_errors import classify_login_error
+        classification = classify_login_error(exc)
+        if classification == 'rate_limited':
+            # The Garmin request was rejected before upload. Preserve ledger
+            # semantics and prevent immediate new attempts on this worker.
+            complete('auth_failed')
+            _garmin_login_failure(exc)
+        if classification == 'auth_failed':
+            complete('auth_failed')
+            raise HTTPException(status_code=401,
+                detail='Identifiants Garmin refusés. Vérifie-les avant un nouvel essai.') from None
+        # Ambiguous failures must not be treated as invalid credentials.
         complete('auth_failed')
-        message = str(exc).lower()
-        if any(marker in message for marker in ('rate limit', 'rate_limit', 'too many requests', '429', 'preauthorized')):
-            raise HTTPException(status_code=429, detail='Garmin limite temporairement les connexions. Attends avant de réessayer.') from None
-        raise HTTPException(status_code=502, detail='Connexion Garmin refusée. Vérifie les identifiants ou le code MFA.') from None
+        raise HTTPException(status_code=503,
+            detail='Authentification Garmin indisponible. Aucun envoi effectué; vérifie le registre avant toute nouvelle tentative.') from None
     try:
         result = send_workout(client, canonical['garmin_workout'], canonical['scheduled_date'])
     except GarminPartialSendError as exc:
