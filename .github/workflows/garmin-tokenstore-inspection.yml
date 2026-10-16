@@ -1,1 +1,28 @@
 
+name: Garmin tokenstore inspection (offline)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/garmin-tokenstore-inspection.yml"
+      - "check_garmin_tokenstore.py"
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Garmin client
+        run: python -m pip install "garminconnect==0.3.19"
+
+      - name: Inspect tokenstore offline
+        run: python check_garmin_tokenstore.py
+
