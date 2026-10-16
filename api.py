@@ -187,3 +187,76 @@ def send_canonical_workout(request: GarminSendRequest, authorization: str | None
     return {'ok': True, 'workoutId': result['workout_id'], 'scheduled': True,
             'athlete_id': canonical['athlete_id'], 'date': canonical['scheduled_date'],
             'name': canonical['garmin_workout']['workoutName'], 'provider': 'python'}
+
+# Garmin return POC: read-only candidates; no matching or persistence.
+from datetime import timedelta
+
+class GarminActivityCandidatesRequest(BaseModel):
+    workout_id: str
+    athlete_id: str
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=1024)
+    mfa_code: str | None = Field(default=None, max_length=24)
+
+@app.post('/activities/candidates')
+def garmin_activity_candidates(request: GarminActivityCandidatesRequest, authorization: str | None = Header(default=None)):
+    if not authorization or not authorization.startswith('Bearer '):
+        raise HTTPException(status_code=401, detail='Connexion PaceFlow requise')
+    try:
+        canonical = preview_workout(authorization[7:], request.workout_id, request.athlete_id, athlete_only=True)
+    except AccessError:
+        raise HTTPException(status_code=403, detail='Accès réservé à cet athlète') from None
+    except ValueError:
+        raise HTTPException(status_code=422, detail='Séance invalide') from None
+    try:
+        target = date.fromisoformat(canonical['scheduled_date'])
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(status_code=422, detail='Date de séance invalide') from None
+    from garminconnect import Garmin
+    class MFARequired(Exception):
+        pass
+    def prompt_mfa():
+        if not request.mfa_code or not request.mfa_code.strip():
+            raise MFARequired()
+        return request.mfa_code.strip()
+    try:
+        client = Garmin(request.email, request.password, prompt_mfa=prompt_mfa)
+        client.login()
+    except MFARequired:
+        raise HTTPException(status_code=428, detail='Code MFA Garmin requis') from None
+    except Exception as exc:
+        message = str(exc).lower()
+        if any(s in message for s in ('429', 'rate limit', 'too many requests', 'preauthorized')):
+            raise HTTPException(status_code=429, detail='Garmin limite temporairement les connexions') from None
+        raise HTTPException(status_code=502, detail='Connexion Garmin refusée') from None
+    start = (target - timedelta(days=2)).isoformat()
+    end = (target + timedelta(days=2)).isoformat()
+    try:
+        activities = client.get_activities_by_date(start, end)
+    except Exception:
+        raise HTTPException(status_code=502, detail='Lecture des activités Garmin impossible') from None
+    if not isinstance(activities, list):
+        raise HTTPException(status_code=502, detail='Réponse Garmin inattendue')
+    candidates = []
+    for item in activities[:100]:
+        if not isinstance(item, dict):
+            continue
+        activity_id = item.get('activityId')
+        if not isinstance(activity_id, (str, int)) or not str(activity_id).isdigit():
+            continue
+        activity_type = item.get('activityType')
+        candidates.append({
+            'activity_id': str(activity_id),
+            'name': str(item.get('activityName') or '')[:200],
+            'start_time_local': item.get('startTimeLocal'),
+            'sport': activity_type.get('typeKey') if isinstance(activity_type, dict) else None,
+            'distance_m': item.get('distance'),
+            'duration_s': item.get('duration'),
+            'moving_duration_s': item.get('movingDuration'),
+            'average_hr': item.get('averageHR'),
+            'max_hr': item.get('maxHR'),
+        })
+    return {'ok': True, 'workout_id': request.workout_id,
+            'athlete_id': canonical['athlete_id'], 'scheduled_date': target.isoformat(),
+            'search_start': start, 'search_end': end, 'candidates': candidates,
+            'confirmed': False, 'saved': False}
