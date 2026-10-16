@@ -188,6 +188,37 @@ def send_canonical_workout(request: GarminSendRequest, authorization: str | None
             'athlete_id': canonical['athlete_id'], 'date': canonical['scheduled_date'],
             'name': canonical['garmin_workout']['workoutName'], 'provider': 'python'}
 
+# Best-effort process-local cooldown: avoids repeat logins on a warm worker.
+# This does not bypass Garmin rate limits and is not shared between Render workers.
+import threading
+import time
+_garmin_cooldown_lock = threading.Lock()
+_garmin_cooldown_until = 0.0
+
+def _guard_garmin_login():
+    with _garmin_cooldown_lock:
+        remaining = _garmin_cooldown_until - time.monotonic()
+    if remaining > 0:
+        raise HTTPException(status_code=429,
+            detail='Garmin limite temporairement les connexions. Attends avant de réessayer.',
+            headers={'Retry-After': str(max(1, int(remaining) + 1))})
+
+def _garmin_login_failure(exc):
+    global _garmin_cooldown_until
+    from garmin_auth_errors import classify_login_error
+    classification = classify_login_error(exc)
+    if classification == 'rate_limited':
+        with _garmin_cooldown_lock:
+            _garmin_cooldown_until = max(_garmin_cooldown_until, time.monotonic() + 900)
+        raise HTTPException(status_code=429,
+            detail='Garmin a temporairement bloqué la connexion (429). Réessaie plus tard, sans multiplier les tentatives.',
+            headers={'Retry-After': '900'}) from None
+    if classification == 'auth_failed':
+        raise HTTPException(status_code=401,
+            detail='Identifiants Garmin refusés. Vérifie-les avant un nouvel essai.') from None
+    raise HTTPException(status_code=502,
+        detail='Connexion Garmin indisponible. Aucun résultat enregistré.') from None
+
 # Garmin return POC: read-only candidates; no matching or persistence.
 from datetime import timedelta
 
@@ -219,16 +250,14 @@ def garmin_activity_candidates(request: GarminActivityCandidatesRequest, authori
         if not request.mfa_code or not request.mfa_code.strip():
             raise MFARequired()
         return request.mfa_code.strip()
+    _guard_garmin_login()
     try:
         client = Garmin(request.email, request.password, prompt_mfa=prompt_mfa)
         client.login()
     except MFARequired:
         raise HTTPException(status_code=428, detail='Code MFA Garmin requis') from None
     except Exception as exc:
-        message = str(exc).lower()
-        if any(s in message for s in ('429', 'rate limit', 'too many requests', 'preauthorized')):
-            raise HTTPException(status_code=429, detail='Garmin limite temporairement les connexions') from None
-        raise HTTPException(status_code=502, detail='Connexion Garmin refusée') from None
+        _garmin_login_failure(exc)
     start = (target - timedelta(days=2)).isoformat()
     end = (target + timedelta(days=2)).isoformat()
     try:
@@ -237,25 +266,8 @@ def garmin_activity_candidates(request: GarminActivityCandidatesRequest, authori
         raise HTTPException(status_code=502, detail='Lecture des activités Garmin impossible') from None
     if not isinstance(activities, list):
         raise HTTPException(status_code=502, detail='Réponse Garmin inattendue')
-    candidates = []
-    for item in activities[:100]:
-        if not isinstance(item, dict):
-            continue
-        activity_id = item.get('activityId')
-        if not isinstance(activity_id, (str, int)) or not str(activity_id).isdigit():
-            continue
-        activity_type = item.get('activityType')
-        candidates.append({
-            'activity_id': str(activity_id),
-            'name': str(item.get('activityName') or '')[:200],
-            'start_time_local': item.get('startTimeLocal'),
-            'sport': activity_type.get('typeKey') if isinstance(activity_type, dict) else None,
-            'distance_m': item.get('distance'),
-            'duration_s': item.get('duration'),
-            'moving_duration_s': item.get('movingDuration'),
-            'average_hr': item.get('averageHR'),
-            'max_hr': item.get('maxHR'),
-        })
+    from garmin_activity_matching import normalize_candidates
+    candidates = normalize_candidates(activities, target)
     return {'ok': True, 'workout_id': request.workout_id,
             'athlete_id': canonical['athlete_id'], 'scheduled_date': target.isoformat(),
             'search_start': start, 'search_end': end, 'candidates': candidates,
