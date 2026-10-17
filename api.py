@@ -1,3 +1,6 @@
+from garmin_session_runtime import login as session_login, persist as session_persist
+from garmin_session_auth import ReconnectRequired
+from garmin_session_store import SessionStoreError
 from fastapi import FastAPI
 
 app = FastAPI(title="PaceFlow Garmin Python Bridge")
@@ -118,7 +121,7 @@ class GarminSendRequest(BaseModel):
     workout_id: str
     athlete_id: str
     email: str = Field(min_length=3, max_length=254)
-    password: str = Field(min_length=1, max_length=1024)
+    password: str | None = Field(default=None, max_length=1024)
     mfa_code: str | None = Field(default=None, max_length=24)
 
 @app.post('/workouts/send')
@@ -166,8 +169,13 @@ def send_canonical_workout(request: GarminSendRequest, authorization: str | None
         return request.mfa_code.strip()
 
     try:
-        client = Garmin(request.email, request.password, prompt_mfa=prompt_mfa)
-        client.login()
+        client, session_auth = session_login(canonical['athlete_id'], request.email, request.password, prompt_mfa)
+    except ReconnectRequired:
+        complete('auth_failed')
+        raise HTTPException(status_code=428, detail='Connexion Garmin requise.') from None
+    except SessionStoreError:
+        complete('auth_failed')
+        raise HTTPException(status_code=503, detail='Stockage des sessions indisponible. Aucun envoi effectue.') from None
     except MFARequired:
         complete('auth_failed')
         raise HTTPException(status_code=428, detail='Code MFA Garmin requis. Renseigne le code puis reconnecte-toi.') from None
@@ -196,6 +204,11 @@ def send_canonical_workout(request: GarminSendRequest, authorization: str | None
         complete('uncertain')
         raise HTTPException(status_code=502, detail='Résultat Garmin incertain. Vérifie Garmin Connect avant de réessayer.') from None
     complete('sent', result['workout_id'])
+    try:
+        session_persist(session_auth, canonical['athlete_id'], client)
+    except SessionStoreError:
+        pass  # The send is confirmed; never suggest resending it.
+
     return {'ok': True, 'workoutId': result['workout_id'], 'scheduled': True,
             'athlete_id': canonical['athlete_id'], 'date': canonical['scheduled_date'],
             'name': canonical['garmin_workout']['workoutName'], 'provider': 'python'}
@@ -238,7 +251,7 @@ class GarminActivityCandidatesRequest(BaseModel):
     workout_id: str
     athlete_id: str
     email: str = Field(min_length=3, max_length=254)
-    password: str = Field(min_length=1, max_length=1024)
+    password: str | None = Field(default=None, max_length=1024)
     mfa_code: str | None = Field(default=None, max_length=24)
 
 @app.post('/activities/candidates')
@@ -264,8 +277,11 @@ def garmin_activity_candidates(request: GarminActivityCandidatesRequest, authori
         return request.mfa_code.strip()
     _guard_garmin_login()
     try:
-        client = Garmin(request.email, request.password, prompt_mfa=prompt_mfa)
-        client.login()
+        client, session_auth = session_login(canonical['athlete_id'], request.email, request.password, prompt_mfa)
+    except ReconnectRequired:
+        raise HTTPException(status_code=428, detail='Connexion Garmin requise.') from None
+    except SessionStoreError:
+        raise HTTPException(status_code=503, detail='Stockage des sessions indisponible.') from None
     except MFARequired:
         raise HTTPException(status_code=428, detail='Code MFA Garmin requis') from None
     except Exception as exc:
@@ -278,6 +294,10 @@ def garmin_activity_candidates(request: GarminActivityCandidatesRequest, authori
         raise HTTPException(status_code=502, detail='Lecture des activités Garmin impossible') from None
     if not isinstance(activities, list):
         raise HTTPException(status_code=502, detail='Réponse Garmin inattendue')
+    try:
+        session_persist(session_auth, canonical['athlete_id'], client)
+    except SessionStoreError:
+        raise HTTPException(status_code=503, detail='Activites lues, session non sauvegardee.') from None
     from garmin_activity_matching import normalize_candidates
     candidates = normalize_candidates(activities, target)
     return {'ok': True, 'workout_id': request.workout_id,
