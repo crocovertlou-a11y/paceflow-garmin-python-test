@@ -23,4 +23,4 @@ jobs:
 
       - name: Inspect Garmin export contract
         run: |
-          python check_garmin_export_contract.py
+          python .github/workflows/check_garmin_export_contract.py
