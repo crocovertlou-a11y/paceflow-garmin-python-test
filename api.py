@@ -206,6 +206,7 @@ import threading
 import time
 _garmin_cooldown_lock = threading.Lock()
 _garmin_cooldown_until = 0.0
+_GARMIN_AUTH_COOLDOWN_SECONDS = 1800
 
 def _guard_garmin_login():
     with _garmin_cooldown_lock:
@@ -221,10 +222,10 @@ def _garmin_login_failure(exc):
     classification = classify_login_error(exc)
     if classification == 'rate_limited':
         with _garmin_cooldown_lock:
-            _garmin_cooldown_until = max(_garmin_cooldown_until, time.monotonic() + 900)
+            _garmin_cooldown_until = max(_garmin_cooldown_until, time.monotonic() + _GARMIN_AUTH_COOLDOWN_SECONDS)
         raise HTTPException(status_code=429,
-            detail='Garmin a temporairement bloqué la connexion (429). Réessaie plus tard, sans multiplier les tentatives.',
-            headers={'Retry-After': '900'}) from None
+            detail='Garmin refuse temporairement la connexion (429 ou protection 403). Aucun envoi confirmé. Ne relance pas cette séance; vérifie Garmin Connect et le registre.',
+            headers={'Retry-After': str(_GARMIN_AUTH_COOLDOWN_SECONDS)}) from None
     if classification == 'auth_failed':
         raise HTTPException(status_code=401,
             detail='Identifiants Garmin refusés. Vérifie-les avant un nouvel essai.') from None
