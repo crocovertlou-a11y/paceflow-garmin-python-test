@@ -9,7 +9,7 @@ def classify_login_error(exc):
     message = str(exc).lower()
     if any(term in message for term in (
         'rate limit', 'rate_limit', 'too many requests', '429',
-        'preauthorized', 'throttl', 'cloudflare', 'bot challenge', 'http 403', 'returned 403',
+        'preauthorized', 'throttl',
     )):
         return 'rate_limited'
     # Explicit credential failures only. Ambiguous 401s may be token/API errors.

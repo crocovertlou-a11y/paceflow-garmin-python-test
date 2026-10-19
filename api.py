@@ -166,12 +166,16 @@ def send_canonical_workout(request: GarminSendRequest, authorization: str | None
         return request.mfa_code.strip()
 
     try:
-        client = Garmin(request.email, request.password, prompt_mfa=prompt_mfa)
-        client.login()
+        from garmin_session_store import login_with_session
+        client = login_with_session(Garmin, athlete_id, request.email, request.password, prompt_mfa)
     except MFARequired:
         complete('auth_failed')
         raise HTTPException(status_code=428, detail='Code MFA Garmin requis. Renseigne le code puis reconnecte-toi.') from None
     except Exception as exc:
+        from garmin_session_store import SessionStoreError
+        if isinstance(exc, SessionStoreError):
+            complete('auth_failed')
+            raise HTTPException(status_code=503, detail='Session Garmin indisponible. Vérifie le stockage sécurisé ou reconnecte le compte; aucun envoi effectué.') from None
         from garmin_auth_errors import classify_login_error
         classification = classify_login_error(exc)
         if classification == 'rate_limited':
@@ -179,6 +183,8 @@ def send_canonical_workout(request: GarminSendRequest, authorization: str | None
             # semantics and prevent immediate new attempts on this worker.
             complete('auth_failed')
             _garmin_login_failure(exc)
+            raise HTTPException(status_code=429,
+                detail='Garmin limite les connexions. Aucun envoi effectué; réessaie après la période de blocage.') from None
         if classification == 'auth_failed':
             complete('auth_failed')
             raise HTTPException(status_code=401,
@@ -206,7 +212,6 @@ import threading
 import time
 _garmin_cooldown_lock = threading.Lock()
 _garmin_cooldown_until = 0.0
-_GARMIN_AUTH_COOLDOWN_SECONDS = 1800
 
 def _guard_garmin_login():
     with _garmin_cooldown_lock:
@@ -222,10 +227,10 @@ def _garmin_login_failure(exc):
     classification = classify_login_error(exc)
     if classification == 'rate_limited':
         with _garmin_cooldown_lock:
-            _garmin_cooldown_until = max(_garmin_cooldown_until, time.monotonic() + _GARMIN_AUTH_COOLDOWN_SECONDS)
+            _garmin_cooldown_until = max(_garmin_cooldown_until, time.monotonic() + 900)
         raise HTTPException(status_code=429,
-            detail='Garmin refuse temporairement la connexion (429 ou protection 403). Aucun envoi confirmé. Ne relance pas cette séance; vérifie Garmin Connect et le registre.',
-            headers={'Retry-After': str(_GARMIN_AUTH_COOLDOWN_SECONDS)}) from None
+            detail='Garmin a temporairement bloqué la connexion (429). Réessaie plus tard, sans multiplier les tentatives.',
+            headers={'Retry-After': '900'}) from None
     if classification == 'auth_failed':
         raise HTTPException(status_code=401,
             detail='Identifiants Garmin refusés. Vérifie-les avant un nouvel essai.') from None
@@ -265,11 +270,14 @@ def garmin_activity_candidates(request: GarminActivityCandidatesRequest, authori
         return request.mfa_code.strip()
     _guard_garmin_login()
     try:
-        client = Garmin(request.email, request.password, prompt_mfa=prompt_mfa)
-        client.login()
+        from garmin_session_store import login_with_session
+        client = login_with_session(Garmin, canonical["athlete_id"], request.email, request.password, prompt_mfa)
     except MFARequired:
         raise HTTPException(status_code=428, detail='Code MFA Garmin requis') from None
     except Exception as exc:
+        from garmin_session_store import SessionStoreError
+        if isinstance(exc, SessionStoreError):
+            raise HTTPException(status_code=503, detail='Session Garmin indisponible') from None
         _garmin_login_failure(exc)
     start = (target - timedelta(days=2)).isoformat()
     end = (target + timedelta(days=2)).isoformat()

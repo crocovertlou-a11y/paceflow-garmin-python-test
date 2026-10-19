@@ -1,5 +1,6 @@
-garminconnect>=0.3.17,<0.4
+garminconnect==0.3.19
 curl_cffi
 
 fastapi>=0.115,<1
 uvicorn>=0.30,<1
+cryptography>=43,<47
