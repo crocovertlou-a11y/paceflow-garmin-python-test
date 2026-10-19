@@ -32,6 +32,12 @@ def _step(b):
             out['pace'] = {'slow': t['max'], 'fast': t['min']}
         elif t.get('type') == 'pace':
             out['pace'] = {'slow': t['value'], 'fast': t['value']}
+        elif t.get('type') in ('heart_rate', 'hr'):
+            value = t.get('value')
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 40 <= value <= 230:
+                raise ValueError('Invalid heart rate target')
+            is_ceiling = '≤' in str(t.get('label', '')) or '<=' in str(t.get('label', ''))
+            out['heart_rate'] = {'min': 40 if is_ceiling else int(value), 'max': int(value)}
         else:
             raise ValueError('Unsupported target: ' + str(t.get('type')))
     return out

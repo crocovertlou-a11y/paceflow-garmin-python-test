@@ -18,7 +18,9 @@ class MappingTests(unittest.TestCase):
     def test_unvalidated_rejected(self):
         self.w['structured_workout']['valid']=False
         with self.assertRaises(ValueError): convert_paceflow(self.w)
-    def test_unsupported_hr_rejected(self):
+    def test_hr_target_converted(self):
         self.w['structured_workout']['blocks'][1]['children'][0]['target']={'type':'heart_rate','value':155}
-        with self.assertRaises(ValueError): convert_paceflow(self.w)
+        step=convert_paceflow(self.w)['workoutSegments'][0]['workoutSteps'][1]
+        self.assertEqual(step['targetType']['workoutTargetTypeKey'], 'heart.rate')
+        self.assertEqual((step['targetValueOne'], step['targetValueTwo']), (155,155))
 if __name__=='__main__':unittest.main()

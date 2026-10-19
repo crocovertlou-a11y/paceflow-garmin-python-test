@@ -49,6 +49,13 @@ def convert(workout):
                         raise ValueError('slow pace must be slower than fast pace')
                     entry.update({'targetType': {'workoutTargetTypeId': 6, 'workoutTargetTypeKey': 'pace.zone'},
                                   'targetValueOne': slow, 'targetValueTwo': fast})
+                if 'heart_rate' in source:
+                    hr = source['heart_rate']
+                    low, high = hr['min'], hr['max']
+                    if not (isinstance(low, int) and isinstance(high, int) and 40 <= low <= high <= 230):
+                        raise ValueError('invalid heart rate range')
+                    entry.update({'targetType': {'workoutTargetTypeId': 4, 'workoutTargetTypeKey': 'heart.rate'},
+                                  'targetValueOne': low, 'targetValueTwo': high})
                 steps.append(entry)
     if not 1 <= len(steps) <= 200:
         raise ValueError('workout must contain 1..200 steps')
